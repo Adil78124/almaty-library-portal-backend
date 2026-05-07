@@ -1,0 +1,35 @@
+{
+  "name": "almaty-library-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:backfill-kz": "tsx scripts/backfill-kz-fields.ts",
+    "dev": "prisma generate && tsx watch src/index.ts",
+    "build": "prisma generate && tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jose": "^6.2.3",
+    "multer": "^1.4.5-lts.2",
+    "zod": "^4.4.1"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^4.17.23",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^20",
+    "prisma": "^6.19.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  }
+}

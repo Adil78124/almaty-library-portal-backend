@@ -1,0 +1,382 @@
+// Модель данных портала: блоки главной, новости, мероприятия, справочники.
+// Зеркало для API-сервера: backend/prisma/schema.prisma — держите в синхроне.
+// SQLite по умолчанию; для продакена замените provider на postgresql и DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BranchType {
+  REGIONAL
+  CITY
+  DISTRICT
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+}
+
+/// Филиал библиотечной сети; админы привязаны к филиалу (кроме SUPER_ADMIN).
+/// Публичные страницы: /branches и /branches/[id] (id — cuid из БД).
+model Branch {
+  id           String        @id @default(cuid())
+  titleRu      String
+  titleKz      String?
+  type         BranchType
+  /// Показывать в каталоге на сайте
+  published    Boolean       @default(true)
+  /// Бейдж «главный филиал» на карточке
+  isMainBranch Boolean       @default(false)
+  subtitle     String?
+  subtitleKz   String?
+  cityLabel    String?
+  cityLabelKz  String?
+  address      String?
+  addressKz    String?
+  phone        String?
+  email        String?
+  hours        String?
+  descriptionRu  String        @default("")
+  descriptionKz  String?
+  cardImageUrl String?
+  heroImageUrl String?
+  /// JSON: [{ "label": "...", "url": "..." }, ...] — соцсети и ссылки филиала
+  socialLinksJson String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  users        User[]
+  newsArticles NewsArticle[]
+  events       Event[]
+}
+
+/// Учётная запись администратора (вход через JWT cookie или POST /auth/login на API).
+model User {
+  id        String   @id @default(cuid())
+  /// Короткий логин для формы входа (уникальный). Вход также возможен по email.
+  login     String?  @unique
+  email     String   @unique
+  password  String
+  name      String
+  role      Role
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Один ряд: id всегда "default" (создаётся в seed).
+model SiteSettings {
+  id String @id @default("default")
+
+  orgNameShort    String
+  orgNameLong     String
+  orgNameShortKz  String?
+  orgNameLongKz   String?
+
+  footerTagline String?
+  footerTaglineKz String?
+  address       String?
+  addressKz     String?
+  phone         String?
+  phoneSecondary String?
+  email         String?
+
+  sanitaryDayRu String?
+  sanitaryDayKz String?
+
+  /// JSON: { monday: { isOpen, from?, to? }, ... sunday }
+  workingHours Json?
+
+  copyrightLine String?
+  copyrightLineKz String?
+  privacyUrl    String?
+  termsUrl      String?
+
+  /// JSON: [{ "label": "...", "url": "..." }, ...]
+  socialLinksJson String?
+
+  /// Сколько опубликованных новостей показывать на главной (источник — только NewsArticle).
+  homeNewsLimit         Int     @default(4)
+  homeNewsAutoRefresh   Boolean @default(true)
+  /// Интервал polling на главной (сек). Если null при включённом автообновлении — используется 60.
+  homeNewsPollSeconds   Int?
+
+  /// Блок «Афиша» на главной: только опубликованные мероприятия с датой из таблицы Event.
+  homeEventsLimit         Int     @default(4)
+  homeEventsAutoRefresh   Boolean @default(true)
+  homeEventsPollSeconds   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Герой главной: фон, заголовки, цитата.
+model HomeHero {
+  id String @id @default("default")
+
+  backgroundImageUrl String?
+  titleLine1         String
+  titleLine2         String
+  quoteText          String
+  quoteAuthor        String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Фразы бегущей строки (порядок — sortOrder).
+model MarqueeItem {
+  id        String   @id @default(cuid())
+  text      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Карточки метрик под героем (иконка — имя Material Symbol).
+model HomeMetric {
+  id        String   @id @default(cuid())
+  iconName  String
+  valueText String
+  label     String
+  sortOrder Int      @default(0)
+  linkUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Пункты верхнего меню сайта.
+model NavItem {
+  id        String   @id @default(cuid())
+  labelRu   String
+  labelKz   String?
+  href      String
+  sortOrder Int      @default(0)
+  visible   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model NewsArticle {
+  id            String         @id @default(cuid())
+  slug          String         @unique
+  titleRu       String
+  titleKz       String?
+  descriptionRu String
+  descriptionKz String?
+  coverImageUrl String? /// URL обложки
+  publishedAt   DateTime? /// дата публикации на сайте
+  location      String? /// место / адрес события
+  locationKz    String?
+  curator       String? /// куратор или контакт
+  curatorKz     String?
+  status        PublishStatus  @default(DRAFT)
+  sortOrder     Int            @default(0)
+  branchId      String?
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Event {
+  id              String        @id @default(cuid())
+  slug            String        @unique
+  titleRu         String
+  titleKz         String?
+  descriptionRu   String        @default("")
+  descriptionKz   String?
+  posterUrl       String?
+  startsAt        DateTime?
+  /// Отображаемое время, напр. «15:00» или «МАЯ | 15:00»
+  timeDisplay     String?
+  timeDisplayKz   String?
+  format          String?       /// Онлайн/Офлайн/Лекция/Встреча (произв. строка)
+  formatKz        String?
+  category        String?       /// Категория (произв. строка)
+  categoryKz      String?
+  location        String?       /// Место проведения (строка)
+  locationKz      String?
+  ctaLabel        String?
+  ctaLabelKz      String?
+  ctaHref         String?
+  featuredOnHome  Boolean       @default(false)
+  status          PublishStatus @default(DRAFT)
+  sortOrder       Int           @default(0)
+  branchId        String?
+  branch          Branch?       @relation(fields: [branchId], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model DigitalLibraryItem {
+  id              String   @id @default(cuid())
+  titleRu         String
+  titleKz         String?
+  descriptionRu   String   @default("")
+  descriptionKz   String?
+  author          String
+  authorKz        String?
+  coverUrl     String?
+  resourceUrl  String?
+  showOnHome   Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Электронная библиотека: основной список (книги/ресурсы) для страницы /digital-library.
+model DigitalBook {
+  id          String   @id @default(cuid())
+  titleRu     String
+  titleKz     String
+  authorRu    String
+  authorKz    String
+  imageUrl    String?
+  fileUrl     String?
+  externalUrl String?
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Электронная библиотека: «Популярные сейчас».
+model PopularBook {
+  id          String   @id @default(cuid())
+  titleRu     String
+  titleKz     String
+  authorRu    String
+  authorKz    String
+  imageUrl    String?
+  externalUrl String
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model NewArrival {
+  id         String   @id @default(cuid())
+  title      String
+  titleKz    String?
+  author     String
+  authorKz   String?
+  coverUrl   String?
+  detailUrl  String?
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model LocalHistoryCard {
+  id          String   @id @default(cuid())
+  name        String
+  nameKz      String?
+  excerpt     String
+  excerptKz   String?
+  portraitUrl String?
+  slug        String?  @unique
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Сотрудники / руководители (страница «Структура библиотеки» и др.).
+model Staff {
+  id String @id @default(cuid())
+
+  /// Уникальный ключ для обновлений/импорта (генерируется из ФИО+филиала)
+  slug String @unique
+
+  fullNameRu String
+  fullNameKz String?
+
+  birthDate DateTime?
+
+  phone String?
+
+  positionRu String?
+  positionKz String?
+
+  /// Район или город (RU/KZ)
+  branchRu String
+  branchKz String?
+
+  /// Путь в public (например, /structurpageimg/Name.jpeg) или URL
+  imageUrl String?
+
+  sortOrder Int @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Слоты медиаблока главной: 0 — большой блок, 1–4 — сетка 2×2.
+model GalleryItem {
+  id          String   @id @default(cuid())
+  slot        Int      @unique
+  imageUrl    String
+  caption     String?
+  videoUrl    String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PartnerLink {
+  id        String   @id @default(cuid())
+  title     String
+  titleKz   String?
+  logoUrl   String?
+  href      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Ссылки на соцсети (футер и др.): полный CRUD через /api/social-links.
+/// icon — ключ набора на фронте (instagram, youtube, …); неизвестный ключ → иконка «link».
+model SocialLink {
+  id        String   @id @default(cuid())
+  label     String
+  labelKz   String?
+  icon      String   @default("link")
+  url       String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Опциональное хранилище загрузок (URL после сохранения файла).
+model MediaAsset {
+  id        String   @id @default(cuid())
+  url       String
+  filename  String?
+  alt       String?
+  mimeType  String?
+  createdAt DateTime @default(now())
+}
+
+/// Универсальный контент страницы: массив секций { type, data }.
+model PageContent {
+  page      String   @id
+  sections  Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}

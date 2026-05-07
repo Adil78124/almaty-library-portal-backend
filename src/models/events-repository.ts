@@ -1,0 +1,52 @@
+import type { Event, Prisma, PublishStatus } from "@prisma/client"
+
+import { prisma } from "../prisma.js"
+
+const publishedWhere: Prisma.EventWhereInput = { status: "PUBLISHED" }
+
+/**
+ * Глобальная афиша (без branchId / null): предстоящие с датой, branchId null.
+ * Конкретный филиал: все опубликованные события этого филиала.
+ */
+export async function listPublishedEventsPublic(options: {
+  limit: number
+  branchId?: string | null
+}): Promise<Event[]> {
+  const now = new Date()
+  const branchFilter = options.branchId
+
+  if (branchFilter === undefined || branchFilter === null) {
+    return prisma.event.findMany({
+      where: {
+        ...publishedWhere,
+        startsAt: { not: null, gte: now },
+        branchId: null,
+      },
+      orderBy: [{ startsAt: "asc" }, { updatedAt: "desc" }],
+      take: options.limit,
+    })
+  }
+
+  return prisma.event.findMany({
+    where: {
+      ...publishedWhere,
+      branchId: branchFilter,
+    },
+    orderBy: [{ startsAt: "desc" }, { updatedAt: "desc" }],
+    take: options.limit,
+  })
+}
+
+export async function listEventsForAdmin(
+  status?: PublishStatus,
+  branchId?: string | null
+): Promise<Event[]> {
+  const where: Prisma.EventWhereInput = {
+    ...(status ? { status } : {}),
+    ...(branchId !== undefined ? { branchId } : {}),
+  }
+  return prisma.event.findMany({
+    where,
+    orderBy: [{ startsAt: "desc" }, { updatedAt: "desc" }],
+  })
+}
