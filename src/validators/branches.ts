@@ -9,7 +9,11 @@ import {
 } from "../lib/content-sanitize.js"
 
 const optionalUrl = z
-  .union([z.string().url(), z.literal("")])
+  .union([
+    z.string().url(),
+    z.string().regex(/^\/uploads\/[^?#]+$/),
+    z.literal(""),
+  ])
   .optional()
   .nullable()
 
@@ -59,7 +63,7 @@ export const branchUpdateSchema = branchCreateSchema.partial()
 export const branchContactsPatchSchema = z
   .object({
     titleRu: localizedTitleSchema.optional(),
-    titleKz: optionalLocalizedTitleSchema,
+    titleKz: optionalLocalizedTitleSchema.optional(),
     subtitle: z.string().max(500).nullable().optional(),
     cityLabel: z.string().max(200).nullable().optional(),
     cardImageUrl: optionalUrl,
@@ -69,7 +73,7 @@ export const branchContactsPatchSchema = z
     email: optionalEmail,
     hours: z.string().max(2000).nullable().optional(),
     descriptionRu: branchDescriptionRuSchema,
-    descriptionKz: optionalLocalizedDescriptionSchema,
+    descriptionKz: optionalLocalizedDescriptionSchema.optional(),
     socialLinksJson: z.string().max(20000).nullable().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, {

@@ -221,6 +221,7 @@ export async function usersCreateAdmin(req: Request, res: Response) {
       name: user.name,
       role: user.role,
       branchId: user.branchId,
+      createdAt: user.createdAt,
     })
   } catch (e: unknown) {
     const code = typeof e === "object" && e !== null ? (e as { code?: string }).code : undefined
@@ -233,4 +234,21 @@ export async function usersCreateAdmin(req: Request, res: Response) {
     }
     throw e
   }
+}
+
+export async function usersGetAdmins(req: Request, res: Response) {
+  const admins = await prisma.user.findMany({
+    where: { role: "ADMIN" },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      login: true,
+      email: true,
+      name: true,
+      role: true,
+      branchId: true,
+      createdAt: true,
+    },
+  })
+  return res.json(admins)
 }

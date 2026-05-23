@@ -216,9 +216,11 @@ export const galleryItemUpdateSchema = galleryItemCreateSchema.partial().omit({
 
 export const partnerLinkCreateSchema = z.object({
   title: z.string().min(1),
+  titleKz: z.string().max(300).nullable().optional(),
   logoUrl: z.string().nullable().optional(),
   href: z.string().min(1),
   sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
 })
 
 export const partnerLinkUpdateSchema = partnerLinkCreateSchema.partial()
@@ -228,6 +230,7 @@ export const socialLinkCreateSchema = z
     label: z.string().min(1),
     labelKz: z.string().max(200).nullable().optional(),
     icon: z.union([z.string(), z.null(), z.undefined()]).optional(),
+    logoUrl: z.string().nullable().optional(),
     url: z.string().url(),
     sortOrder: z.number().int().optional(),
   })
@@ -241,6 +244,7 @@ export const socialLinkUpdateSchema = z
     label: z.string().min(1).optional(),
     labelKz: z.string().max(200).nullable().optional(),
     icon: z.union([z.string(), z.null()]).optional(),
+    logoUrl: z.string().nullable().optional(),
     url: z.string().url().optional(),
     sortOrder: z.number().int().optional(),
   })

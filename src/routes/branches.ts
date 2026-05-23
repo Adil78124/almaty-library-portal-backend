@@ -3,9 +3,11 @@ import { Router } from "express"
 import {
   branchesCreate,
   branchesDelete,
+  branchesGetAdministrator,
   branchesGetById,
   branchesList,
   branchesPatchContacts,
+  branchesSetAdministrator,
   branchesUpdate,
 } from "../controllers/branches-controller.js"
 import { requireRole } from "../middleware/requireRole.js"
@@ -19,6 +21,20 @@ branchesRouter.patch(
   requireRole(["SUPER_ADMIN", "ADMIN"]),
   (req, res, next) => {
     void branchesPatchContacts(req, res).catch(next)
+  }
+)
+branchesRouter.get(
+  "/:id/administrator",
+  requireRole(["SUPER_ADMIN"]),
+  (req, res, next) => {
+    void branchesGetAdministrator(req, res).catch(next)
+  }
+)
+branchesRouter.patch(
+  "/:id/administrator",
+  requireRole(["SUPER_ADMIN"]),
+  (req, res, next) => {
+    void branchesSetAdministrator(req, res).catch(next)
   }
 )
 branchesRouter.patch("/:id", requireRole(["SUPER_ADMIN"]), branchesUpdate)

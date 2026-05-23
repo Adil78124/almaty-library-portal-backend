@@ -6,7 +6,7 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:backfill-kz": "tsx scripts/backfill-kz-fields.ts",
-    "dev": "prisma generate && tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
     "start": "node dist/index.js"
   },

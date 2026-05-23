@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 import type { Request, Response } from "express"
+import { z } from "zod"
 
 import { checkBranchAccess } from "../lib/branch-access.js"
 import { getOptionalAdmin } from "../lib/auth.js"
@@ -309,4 +310,84 @@ export async function branchesDelete(req: Request, res: Response) {
     console.error("[DELETE /branches/:id]", e)
     return jsonError(res, "Не удалось удалить", 500)
   }
+}
+
+export async function branchesGetAdministrator(req: Request, res: Response) {
+  const { id } = req.params
+  const existing = await prisma.branch.findUnique({ where: { id } })
+  if (!existing) {
+    return jsonError(res, "Филиал не найден", 404)
+  }
+  const admin = await prisma.user.findFirst({
+    where: { branchId: id, role: "ADMIN" },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      login: true,
+      email: true,
+      name: true,
+      role: true,
+      branchId: true,
+      createdAt: true,
+    },
+  })
+  return res.json({ administrator: admin || null })
+}
+
+const setAdministratorSchema = z.object({
+  userId: z.string().min(1).nullable(),
+})
+
+export async function branchesSetAdministrator(req: Request, res: Response) {
+  const { id } = req.params
+  const parsed = setAdministratorSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return jsonValidationError(res, parsed.error)
+  }
+  const { userId } = parsed.data
+
+  const existing = await prisma.branch.findUnique({ where: { id } })
+  if (!existing) {
+    return jsonError(res, "Филиал не найден", 404)
+  }
+
+  if (userId === null) {
+    const current = await prisma.user.findFirst({
+      where: { branchId: id, role: "ADMIN" },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true },
+    })
+    if (current) {
+      await prisma.user.update({
+        where: { id: current.id },
+        data: { branchId: null },
+      })
+    }
+    return res.json({ success: true, administrator: null })
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    return jsonError(res, "Пользователь не найден", 404)
+  }
+
+  if (user.role !== "ADMIN") {
+    return jsonError(res, "Пользователь должен иметь роль администратора", 400)
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { branchId: id },
+    select: {
+      id: true,
+      login: true,
+      email: true,
+      name: true,
+      role: true,
+      branchId: true,
+      createdAt: true,
+    },
+  })
+
+  return res.json({ success: true, administrator: updated })
 }

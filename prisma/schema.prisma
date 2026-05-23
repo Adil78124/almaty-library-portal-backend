@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -357,6 +357,7 @@ model SocialLink {
   label     String
   labelKz   String?
   icon      String   @default("link")
+  logoUrl   String?
   url       String
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())

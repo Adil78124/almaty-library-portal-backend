@@ -2,6 +2,7 @@ import { Router } from "express"
 
 import {
   usersCreateAdmin,
+  usersGetAdmins,
   usersGetMe,
   usersList,
   usersPatchMe,
@@ -15,6 +16,9 @@ usersRouter.get("/me", (req, res, next) => {
 })
 usersRouter.get("/", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
   void usersList(req, res).catch(next)
+})
+usersRouter.get("/admins", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
+  void usersGetAdmins(req, res).catch(next)
 })
 usersRouter.patch("/me", (req, res, next) => {
   void usersPatchMe(req, res).catch(next)
