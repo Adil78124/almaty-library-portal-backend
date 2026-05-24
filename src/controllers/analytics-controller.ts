@@ -1,8 +1,10 @@
 import crypto from "node:crypto"
+import fs from "node:fs"
 
 import type { Request, Response } from "express"
-import PDFDocument from "pdfkit"
-import * as XLSX from "xlsx"
+import ExcelJS from "exceljs"
+import { jsPDF } from "jspdf"
+import { autoTable } from "jspdf-autotable"
 import { z } from "zod"
 
 import { jsonError, jsonValidationError } from "../lib/http.js"
@@ -16,6 +18,12 @@ const PERIOD_DAYS = {
 
 type Period = keyof typeof PERIOD_DAYS
 type AdminScope = { branchId?: string | null }
+
+const PERIOD_LABEL: Record<Period, string> = {
+  "7d": "7 дней",
+  "30d": "30 дней",
+  "3m": "3 месяца",
+}
 
 const visitSchema = z.object({
   path: z.string().min(1).max(500),
@@ -99,6 +107,71 @@ function formatDateForExport(iso: string): string {
   return d.toLocaleDateString("ru-RU", { timeZone: "UTC" })
 }
 
+function reportDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function generatedAt(): string {
+  return new Date().toLocaleString("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Almaty",
+  })
+}
+
+function styleWorksheet(sheet: ExcelJS.Worksheet) {
+  sheet.views = [{ state: "frozen", ySplit: 1 }]
+  const header = sheet.getRow(1)
+  header.font = { bold: true, color: { argb: "FF111827" } }
+  header.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFE5E7EB" },
+  }
+  header.alignment = { vertical: "middle" }
+
+  sheet.columns.forEach((column) => {
+    let maxLength = 12
+    column.eachCell?.({ includeEmpty: true }, (cell) => {
+      const raw = cell.value
+      const value =
+        raw === null || raw === undefined
+          ? ""
+          : typeof raw === "object"
+            ? JSON.stringify(raw)
+            : String(raw)
+      maxLength = Math.max(maxLength, value.length)
+    })
+    column.width = Math.min(Math.max(maxLength + 2, 12), 48)
+  })
+}
+
+function resolvePdfFontPath(): string | null {
+  const candidates = [
+    process.env.PDF_FONT_PATH,
+    "C:\\Windows\\Fonts\\arial.ttf",
+    "C:\\Windows\\Fonts\\calibri.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+  ].filter(Boolean) as string[]
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null
+}
+
+function registerPdfFont(doc: jsPDF): string {
+  const fontPath = resolvePdfFontPath()
+  if (!fontPath) return "helvetica"
+
+  const fontName = "AnalyticsFont"
+  const fontFile = "analytics-font.ttf"
+  const font = fs.readFileSync(fontPath).toString("base64")
+  doc.addFileToVFS(fontFile, font)
+  doc.addFont(fontFile, fontName, "normal")
+  doc.setFont(fontName, "normal")
+  return fontName
+}
+
 async function getSummaryData(period: Period, scope: AdminScope) {
   const start = periodStart(period)
   const baseWhere = {
@@ -121,6 +194,12 @@ async function getSummaryData(period: Period, scope: AdminScope) {
       orderBy: { createdAt: "asc" },
     }),
   ])
+  const branch = scope.branchId
+    ? await prisma.branch.findUnique({
+        where: { id: scope.branchId },
+        select: { id: true, titleRu: true },
+      })
+    : null
 
   const days = new Map<string, { date: string; visits: number; visitors: Set<string> }>()
   for (let i = 0; i < PERIOD_DAYS[period]; i++) {
@@ -141,6 +220,9 @@ async function getSummaryData(period: Period, scope: AdminScope) {
     period,
     from: start.toISOString(),
     to: new Date().toISOString(),
+    scope: scope.branchId ? "branch" : "site",
+    branchId: scope.branchId ?? null,
+    branchName: branch?.titleRu ?? null,
     totalVisits: pageViews,
     pageViews,
     uniqueVisitors: uniqueVisitors.length,
@@ -324,6 +406,8 @@ export async function analyticsExport(req: Request, res: Response) {
   const period = getPeriod(req)
   const scope = adminScope(req)
   const format = typeof req.query.format === "string" ? req.query.format : "xlsx"
+  const date = reportDate()
+  const generationDate = generatedAt()
   const [summary, pages, branches] = await Promise.all([
     getSummaryData(period, scope),
     getPagesData(period, scope),
@@ -331,61 +415,134 @@ export async function analyticsExport(req: Request, res: Response) {
   ])
 
   if (format === "pdf") {
-    const doc = new PDFDocument({ margin: 40, size: "A4" })
-    const chunks: Buffer[] = []
-    doc.on("data", (chunk: Buffer) => chunks.push(chunk))
-    doc.on("end", () => {
-      const body = Buffer.concat(chunks)
-      res.setHeader("content-type", "application/pdf")
-      res.setHeader("content-disposition", `attachment; filename="analytics-${period}.pdf"`)
-      res.send(body)
+    const doc = new jsPDF({ format: "a4", unit: "pt" })
+    const font = registerPdfFont(doc)
+    const tableStyles = {
+      font,
+      fontStyle: "normal" as const,
+      fontSize: 9,
+      cellPadding: 5,
+      textColor: [17, 24, 39] as [number, number, number],
+      lineColor: [229, 231, 235] as [number, number, number],
+      lineWidth: 0.5,
+    }
+    const headStyles = {
+      font,
+      fontStyle: "normal" as const,
+      fillColor: [229, 231, 235] as [number, number, number],
+      textColor: [17, 24, 39] as [number, number, number],
+    }
+
+    doc.setFont(font, "normal")
+    doc.setFontSize(18)
+    doc.text("Отчёт по посещаемости сайта", 40, 48)
+    doc.setFontSize(10)
+    doc.text(`Период: ${PERIOD_LABEL[period]}`, 40, 72)
+    doc.text(`Дата формирования: ${generationDate}`, 40, 88)
+    if (summary.scope === "branch") {
+      doc.text(`Филиал: ${summary.branchName ?? "не указан"}`, 40, 104)
+    }
+
+    autoTable(doc, {
+      startY: summary.scope === "branch" ? 124 : 108,
+      head: [["Показатель", "Значение"]],
+      body: [
+        ["Всего посещений", summary.totalVisits],
+        ["Просмотры страниц", summary.pageViews],
+        ["Уникальные посетители", summary.uniqueVisitors],
+        ["Сейчас на сайте", summary.online],
+      ],
+      styles: tableStyles,
+      headStyles,
+      theme: "grid",
     })
-    doc.fontSize(18).text("Analytics report", { underline: true })
-    doc.moveDown()
-    doc.fontSize(11).text(`Period: ${period}`)
-    doc.text(`Visits: ${summary.pageViews}`)
-    doc.text(`Unique visitors: ${summary.uniqueVisitors}`)
-    doc.text(`Currently online: ${summary.online}`)
-    doc.moveDown()
-    doc.fontSize(14).text("Top pages")
-    for (const row of pages.slice(0, 25)) {
-      doc.fontSize(9).text(`${row.path} | ${row.section ?? "-"} | visits: ${row.visits} | unique: ${row.uniqueVisitors}`)
-    }
-    doc.moveDown()
-    doc.fontSize(14).text("Branches")
-    for (const row of branches.slice(0, 25)) {
-      doc.fontSize(9).text(`${row.titleRu} | visits: ${row.visits} | unique: ${row.uniqueVisitors}`)
-    }
-    doc.end()
-    return
+
+    autoTable(doc, {
+      startY: (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable!.finalY + 24,
+      head: [["Страница", "Раздел", "Просмотры", "Уникальные посетители"]],
+      body: pages.length
+        ? pages.map((row) => [row.path, row.section ?? "-", row.visits, row.uniqueVisitors])
+        : [["Нет данных за выбранный период", "-", "-", "-"]],
+      styles: tableStyles,
+      headStyles,
+      theme: "grid",
+    })
+
+    autoTable(doc, {
+      startY: (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable!.finalY + 24,
+      head: [["Филиал", "Просмотры", "Уникальные посетители"]],
+      body: branches.length
+        ? branches.map((row) => [row.titleRu, row.visits, row.uniqueVisitors])
+        : [["Нет данных за выбранный период", "-", "-"]],
+      styles: tableStyles,
+      headStyles,
+      theme: "grid",
+    })
+
+    const body = Buffer.from(doc.output("arraybuffer"))
+    res.setHeader("content-type", "application/pdf")
+    res.setHeader("content-disposition", `attachment; filename="analytics-report-${period}-${date}.pdf"`)
+    return res.send(body)
   }
 
   if (format !== "xlsx") {
     return jsonError(res, "Unsupported export format", 400)
   }
 
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet([
-      { metric: "period", value: period },
-      { metric: "from", value: summary.from },
-      { metric: "to", value: summary.to },
-      { metric: "pageViews", value: summary.pageViews },
-      { metric: "uniqueVisitors", value: summary.uniqueVisitors },
-      { metric: "online", value: summary.online },
-    ]),
-    "Summary"
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = "Almaty Library Portal"
+  workbook.created = new Date()
+
+  const summarySheet = workbook.addWorksheet("Summary")
+  summarySheet.columns = [
+    { header: "Metric", key: "metric" },
+    { header: "Value", key: "value" },
+  ]
+  summarySheet.addRows([
+    { metric: "Период", value: PERIOD_LABEL[period] },
+    { metric: "Дата формирования", value: generationDate },
+    { metric: "Всего посещений", value: summary.totalVisits },
+    { metric: "Просмотры страниц", value: summary.pageViews },
+    { metric: "Уникальные посетители", value: summary.uniqueVisitors },
+    { metric: "Сейчас на сайте", value: summary.online },
+    ...(summary.scope === "branch" ? [{ metric: "Филиал", value: summary.branchName ?? "не указан" }] : []),
+  ])
+  styleWorksheet(summarySheet)
+
+  const pagesSheet = workbook.addWorksheet("Pages")
+  pagesSheet.columns = [
+    { header: "Page path", key: "path" },
+    { header: "Section", key: "section" },
+    { header: "Visits", key: "visits" },
+    { header: "Unique visitors", key: "uniqueVisitors" },
+  ]
+  pagesSheet.addRows(
+    pages.map((row) => ({
+      path: row.path,
+      section: row.section ?? "-",
+      visits: row.visits,
+      uniqueVisitors: row.uniqueVisitors,
+    }))
   )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(summary.series.map((row) => ({ ...row, date: formatDateForExport(row.date) }))),
-    "Daily"
+  styleWorksheet(pagesSheet)
+
+  const branchesSheet = workbook.addWorksheet("Branches")
+  branchesSheet.columns = [
+    { header: "Branch name", key: "branchName" },
+    { header: "Visits", key: "visits" },
+    { header: "Unique visitors", key: "uniqueVisitors" },
+  ]
+  branchesSheet.addRows(
+    branches.map((row) => ({
+      branchName: row.titleRu,
+      visits: row.visits,
+      uniqueVisitors: row.uniqueVisitors,
+    }))
   )
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pages), "Pages")
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(branches), "Branches")
-  const body = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer
+  styleWorksheet(branchesSheet)
+
+  const body = Buffer.from(await workbook.xlsx.writeBuffer())
   res.setHeader("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-  res.setHeader("content-disposition", `attachment; filename="analytics-${period}.xlsx"`)
+  res.setHeader("content-disposition", `attachment; filename="analytics-report-${period}-${date}.xlsx"`)
   return res.send(body)
 }
