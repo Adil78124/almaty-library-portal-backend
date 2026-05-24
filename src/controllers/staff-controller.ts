@@ -106,3 +106,19 @@ export async function staffPatch(req: Request, res: Response) {
   }
 }
 
+export async function staffDelete(req: Request, res: Response) {
+  const { id } = req.params
+  const existing = await prisma.staff.findUnique({ where: { id } })
+  if (!existing) {
+    return jsonError(res, "РќРµ РЅР°Р№РґРµРЅРѕ", 404)
+  }
+
+  try {
+    await prisma.staff.delete({ where: { id } })
+    return res.status(204).send()
+  } catch (e) {
+    console.error("[DELETE /staff/:id]", e)
+    return jsonError(res, "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ", 500)
+  }
+}
+

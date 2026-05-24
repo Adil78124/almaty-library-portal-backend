@@ -1,6 +1,6 @@
 import { Router } from "express"
 
-import { staffCreate, staffList, staffPatch } from "../controllers/staff-controller.js"
+import { staffCreate, staffDelete, staffList, staffPatch } from "../controllers/staff-controller.js"
 import { requireRole } from "../middleware/requireRole.js"
 
 export const staffRouter = Router()
@@ -17,5 +17,9 @@ staffRouter.post("/", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
 
 staffRouter.patch("/:id", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
   void staffPatch(req, res).catch(next)
+})
+
+staffRouter.delete("/:id", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
+  void staffDelete(req, res).catch(next)
 })
 
