@@ -13,12 +13,12 @@ async function hashPassword(plain: string): Promise<string> {
 
 const prisma = new PrismaClient()
 
-const BRANCHES: { name: string; type: "REGIONAL" | "CITY" | "DISTRICT" }[] = [
-  { name: "Алматинская областная библиотека", type: "REGIONAL" },
-  { name: "Городская библиотека №1", type: "CITY" },
-  { name: "Городская библиотека №2", type: "CITY" },
+const BRANCHES: { titleRu: string; type: "REGIONAL" | "CITY" | "DISTRICT" }[] = [
+  { titleRu: "Алматинская областная библиотека", type: "REGIONAL" },
+  { titleRu: "Городская библиотека №1", type: "CITY" },
+  { titleRu: "Городская библиотека №2", type: "CITY" },
   ...Array.from({ length: 9 }, (_, i) => ({
-    name: `Районная библиотека №${i + 1}`,
+    titleRu: `Районная библиотека №${i + 1}`,
     type: "DISTRICT" as const,
   })),
 ]
@@ -35,9 +35,9 @@ const SUPER_NAME =
 
 async function main() {
   for (const b of BRANCHES) {
-    const found = await prisma.branch.findFirst({ where: { name: b.name } })
+    const found = await prisma.branch.findFirst({ where: { titleRu: b.titleRu } })
     if (!found) {
-      await prisma.branch.create({ data: b })
+      await prisma.branch.create({ data: { titleRu: b.titleRu, type: b.type, descriptionRu: "" } })
     }
   }
 
