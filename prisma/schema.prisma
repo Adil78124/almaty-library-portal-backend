@@ -59,6 +59,8 @@ model Branch {
   users        User[]
   newsArticles NewsArticle[]
   events       Event[]
+  pageVisits   PageVisit[]
+  visitorActivities VisitorActivity[]
 }
 
 /// Учётная запись администратора (вход через JWT cookie или POST /auth/login на API).
@@ -380,4 +382,39 @@ model PageContent {
   sections  Json
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
+}
+
+model PageVisit {
+  id        String   @id @default(cuid())
+  path      String
+  pageTitle String?
+  section   String?
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+
+  visitorId String
+  sessionId String?
+  ipHash    String?
+  userAgent String?
+  referrer  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([path, createdAt])
+  @@index([section, createdAt])
+  @@index([branchId, createdAt])
+  @@index([visitorId, createdAt])
+}
+
+model VisitorActivity {
+  visitorId String @id
+  sessionId String?
+  path      String?
+  branchId  String?
+  branch    Branch? @relation(fields: [branchId], references: [id])
+  lastSeenAt DateTime @default(now())
+
+  @@index([lastSeenAt])
+  @@index([branchId, lastSeenAt])
 }

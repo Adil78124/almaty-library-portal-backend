@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser"
 import express from "express"
 
 import { authRouter } from "./routes/auth.js"
+import { analyticsAdminRouter, analyticsRouter } from "./routes/analytics.js"
 import { branchesRouter } from "./routes/branches.js"
 import { eventsRouter } from "./routes/events.js"
 import { newsRouter } from "./routes/news.js"
@@ -38,6 +39,8 @@ app.use(cookieParser())
 app.use(express.json({ limit: "4mb" }))
 
 app.use("/auth", authRouter)
+app.use("/api/analytics", analyticsRouter)
+app.use("/api/admin/analytics", analyticsAdminRouter)
 app.use("/users", usersRouter)
 app.use("/branches", branchesRouter)
 app.use("/api/news", newsRouter)
