@@ -2,10 +2,12 @@ import { Router } from "express"
 
 import {
   usersCreateAdmin,
+  usersDeleteAdmin,
   usersGetAdmins,
   usersGetMe,
   usersList,
   usersPatchMe,
+  usersUpdateAdmin,
 } from "../controllers/users-controller.js"
 import { requireRole } from "../middleware/requireRole.js"
 
@@ -24,3 +26,9 @@ usersRouter.patch("/me", (req, res, next) => {
   void usersPatchMe(req, res).catch(next)
 })
 usersRouter.post("/admin", requireRole(["SUPER_ADMIN"]), usersCreateAdmin)
+usersRouter.patch("/admin/:id", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
+  void usersUpdateAdmin(req, res).catch(next)
+})
+usersRouter.delete("/admin/:id", requireRole(["SUPER_ADMIN"]), (req, res, next) => {
+  void usersDeleteAdmin(req, res).catch(next)
+})

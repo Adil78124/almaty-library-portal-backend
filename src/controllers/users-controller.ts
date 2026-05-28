@@ -10,6 +10,8 @@ import { prisma } from "../prisma.js"
 const loginCharsMessage =
   "Логин: только буквы, цифры, точка и дефис, без @. Смену почты укажите в поле «email», не в логине."
 
+const loginCharsRegex = /^[\p{L}\p{N}._-]+$/u
+
 const createAdminSchema = z.object({
   email: z.string().email(),
   /** Уникальный логин для входа; если не задан — берётся часть до @ из email. */
@@ -17,12 +19,36 @@ const createAdminSchema = z.object({
     .string()
     .min(2)
     .max(64)
-    .regex(/^[a-zA-Zа-яА-ЯёЁ0-9._-]+$/, loginCharsMessage)
+      .regex(loginCharsRegex, loginCharsMessage)
     .optional(),
   password: z.string().min(6),
   name: z.string().min(1),
   branchId: z.string().min(1),
 })
+
+const updateAdminSchema = z
+  .object({
+    email: z.string().email().optional(),
+    login: z
+      .string()
+      .min(2)
+      .max(64)
+    .regex(loginCharsRegex, loginCharsMessage)
+      .nullable()
+      .optional(),
+    password: z.string().min(6).optional(),
+    name: z.string().min(1).optional(),
+    branchId: z.string().min(1).optional(),
+  })
+  .refine(
+    (d) =>
+      d.login !== undefined ||
+      d.email !== undefined ||
+      d.password !== undefined ||
+      d.name !== undefined ||
+      d.branchId !== undefined,
+    { message: "РЈРєР°Р¶РёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕ РїРѕР»Рµ РґР»СЏ РёР·РјРµРЅРµРЅРёСЏ" }
+  )
 
 const patchMeSchema = z
   .object({
@@ -31,7 +57,7 @@ const patchMeSchema = z
       .string()
       .min(2)
       .max(64)
-      .regex(/^[a-zA-Zа-яА-ЯёЁ0-9._-]+$/, loginCharsMessage)
+      .regex(loginCharsRegex, loginCharsMessage)
       .optional(),
     email: z.string().email().optional(),
     newPassword: z.string().min(6).optional(),
@@ -251,4 +277,89 @@ export async function usersGetAdmins(req: Request, res: Response) {
     },
   })
   return res.json(admins)
+}
+
+export async function usersUpdateAdmin(req: Request, res: Response) {
+  const { id } = req.params
+  if (!id) return jsonError(res, "ID РЅРµ СѓРєР°Р·Р°РЅ", 400)
+
+  const parsed = updateAdminSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return jsonValidationError(res, parsed.error)
+  }
+
+  const user = await prisma.user.findUnique({ where: { id } })
+  if (!user) return jsonError(res, "РџРѕР»СЊР·РѕРІР°РІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", 404)
+  if (user.role !== "ADMIN") {
+    return jsonError(res, "РњРѕР¶РЅРѕ РёР·РјРµРЅСЏС‚СЊ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРѕРІ С„РёР»РёР°Р»РѕРІ", 403)
+  }
+
+  const data = parsed.data
+  if (data.branchId !== undefined) {
+    const branch = await prisma.branch.findUnique({ where: { id: data.branchId } })
+    if (!branch) return jsonError(res, "Р¤РёР»РёР°Р» РЅРµ РЅР°Р№РґРµРЅ", 400)
+  }
+
+  const loginNext =
+    data.login === undefined
+      ? undefined
+      : data.login === null
+        ? null
+        : data.login.trim().toLowerCase()
+  const emailNext =
+    data.email !== undefined ? normalizeEmail(data.email) : undefined
+  const nameNext = data.name !== undefined ? data.name.trim() : undefined
+  const passwordHash =
+    data.password !== undefined ? await hashPassword(data.password) : undefined
+
+  try {
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        ...(loginNext !== undefined ? { login: loginNext } : {}),
+        ...(emailNext !== undefined ? { email: emailNext } : {}),
+        ...(nameNext !== undefined ? { name: nameNext } : {}),
+        ...(data.branchId !== undefined ? { branchId: data.branchId } : {}),
+        ...(passwordHash !== undefined ? { password: passwordHash } : {}),
+      },
+      select: {
+        id: true,
+        login: true,
+        email: true,
+        name: true,
+        role: true,
+        branchId: true,
+        createdAt: true,
+      },
+    })
+    return res.json(updated)
+  } catch (e: unknown) {
+    const code =
+      typeof e === "object" && e !== null ? (e as { code?: string }).code : undefined
+    if (code === "P2002") {
+      return jsonError(
+        res,
+        "РўР°РєРѕР№ email РёР»Рё Р»РѕРіРёРЅ СѓР¶Рµ Р·Р°РЅСЏС‚. РЈРєР°Р¶РёС‚Рµ РґСЂСѓРіРёРµ Р·РЅР°С‡РµРЅРёСЏ.",
+        409
+      )
+    }
+    throw e
+  }
+}
+
+export async function usersDeleteAdmin(req: Request, res: Response) {
+  const { id } = req.params
+  if (!id) return jsonError(res, "ID РЅРµ СѓРєР°Р·Р°РЅ", 400)
+
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, role: true },
+  })
+  if (!user) return jsonError(res, "РџРѕР»СЊР·РѕРІР°РІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", 404)
+  if (user.role !== "ADMIN") {
+    return jsonError(res, "РњРѕР¶РЅРѕ СѓРґР°Р»СЏС‚СЊ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРѕРІ С„РёР»РёР°Р»РѕРІ", 403)
+  }
+
+  await prisma.user.delete({ where: { id } })
+  return res.status(204).send()
 }

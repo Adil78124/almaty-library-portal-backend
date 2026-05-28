@@ -20,6 +20,28 @@ function uploadRootDir(): string {
   return path.resolve(process.cwd(), "../frontend/web/public/uploads")
 }
 
+function resolveUploadedFile(parts: string[]): string | null {
+  if (!parts.length) return null
+  for (const part of parts) {
+    if (
+      !part ||
+      part === "." ||
+      part === ".." ||
+      part.includes("/") ||
+      part.includes("\\") ||
+      part.includes("\0")
+    ) {
+      return null
+    }
+  }
+
+  const root = uploadRootDir()
+  const filePath = path.resolve(root, ...parts)
+  const relative = path.relative(root, filePath)
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return null
+  return filePath
+}
+
 function extFromMime(mime: string): string {
   if (mime === "image/png") return "png"
   if (mime === "image/webp") return "webp"
@@ -52,6 +74,28 @@ const uploadMiddleware = multer({
 })
 
 export function registerUploadRoute(app: Express) {
+  app.get("/uploads/*", (req, res) => {
+    const raw = (req.params as Record<string, string>)["0"] ?? ""
+    let parts: string[]
+    try {
+      parts = raw.split("/").map((part: string) => decodeURIComponent(part))
+    } catch {
+      res.status(404).json({ error: "Not Found" })
+      return
+    }
+    const filePath = resolveUploadedFile(parts)
+    if (!filePath) {
+      res.status(404).json({ error: "Not Found" })
+      return
+    }
+
+    res.sendFile(filePath, (err) => {
+      if (err && !res.headersSent) {
+        res.status(404).json({ error: "Not Found" })
+      }
+    })
+  })
+
   app.post(
     "/api/upload",
     (req, res, next) => {

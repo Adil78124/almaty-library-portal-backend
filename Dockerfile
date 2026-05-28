@@ -13,4 +13,7 @@ RUN npm run build
 
 EXPOSE 4000
 
+ENV UPLOAD_DIR=/app/public/uploads
+VOLUME ["/app/public/uploads"]
+
 CMD ["node", "dist/index.js"]
