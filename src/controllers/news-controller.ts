@@ -4,7 +4,7 @@ import type { Request, Response } from "express"
 import type { z } from "zod"
 
 import { parseApiLang, pickApiLang, type ApiLang } from "../lib/api-lang.js"
-import { getOptionalAdmin, requireAdminJson } from "../lib/auth.js"
+import { getOptionalAdmin, requireAdminJson, type AdminPrincipal } from "../lib/auth.js"
 import { jsonError, jsonValidationError } from "../lib/http.js"
 import { assertBranchScopedResource } from "../lib/resource-access.js"
 import { parsePublishedAtInput } from "../lib/publish-date.js"
@@ -18,6 +18,11 @@ import { prisma } from "../prisma.js"
 import { newsCreateSchema, newsUpdateSchema } from "../validators/content.js"
 
 type NewsUpdate = z.infer<typeof newsUpdateSchema>
+
+type HomePublishStatus = "PENDING" | "APPROVED" | "REJECTED"
+type BranchRelation = {
+  branch?: { titleRu: string; titleKz: string | null } | null
+}
 
 type ContentScope = "main" | "branches" | "all"
 function parseContentScope(req: Request): ContentScope {
@@ -41,7 +46,7 @@ function uniqueViolationTargets(e: unknown): string[] | undefined {
   return meta?.target
 }
 
-function serializeNewsArticleAdmin(item: NewsArticle) {
+function serializeNewsArticleAdmin(item: NewsArticle & BranchRelation) {
   return {
     id: item.id,
     slug: item.slug,
@@ -58,12 +63,20 @@ function serializeNewsArticleAdmin(item: NewsArticle) {
     status: item.status,
     sortOrder: item.sortOrder,
     branchId: item.branchId,
+    branchTitleRu: item.branch?.titleRu ?? null,
+    branchTitleKz: item.branch?.titleKz ?? null,
+    showOnHomeRequested: item.showOnHomeRequested,
+    homePublishStatus: item.homePublishStatus,
+    homePublishRequestedAt: item.homePublishRequestedAt?.toISOString() ?? null,
+    homePublishReviewedAt: item.homePublishReviewedAt?.toISOString() ?? null,
+    homePublishReviewedBy: item.homePublishReviewedBy,
+    homePublishRejectReason: item.homePublishRejectReason,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
   }
 }
 
-function serializeNewsPublic(item: NewsArticle, lang: ApiLang) {
+function serializeNewsPublic(item: NewsArticle & BranchRelation, lang: ApiLang) {
   return {
     id: item.id,
     slug: item.slug,
@@ -78,6 +91,112 @@ function serializeNewsPublic(item: NewsArticle, lang: ApiLang) {
     location: pickApiLang(lang, item.location, item.locationKz),
     curator: pickApiLang(lang, item.curator, item.curatorKz),
     branchId: item.branchId,
+    branchTitle: item.branchId
+      ? pickApiLang(lang, item.branch?.titleRu ?? null, item.branch?.titleKz ?? null)
+      : null,
+  }
+}
+
+function homePublishCreateData(
+  admin: AdminPrincipal,
+  branchId: string | null,
+  input: {
+    showOnHomeRequested?: boolean
+    homePublishStatus?: HomePublishStatus | null
+    homePublishRejectReason?: string | null
+  }
+): Partial<Prisma.NewsArticleUncheckedCreateInput> {
+  if (!branchId) {
+    return {
+      showOnHomeRequested: false,
+      homePublishStatus: null,
+      homePublishRequestedAt: null,
+      homePublishReviewedAt: null,
+      homePublishReviewedBy: null,
+      homePublishRejectReason: null,
+    }
+  }
+
+  const requestedByBranch = admin.role === "ADMIN" && input.showOnHomeRequested === true
+  const status =
+    admin.role === "SUPER_ADMIN"
+      ? input.homePublishStatus ?? (input.showOnHomeRequested ? "PENDING" : null)
+      : requestedByBranch
+        ? "PENDING"
+        : null
+  const reviewed = status === "APPROVED" || status === "REJECTED"
+
+  return {
+    showOnHomeRequested: status === "APPROVED" || status === "PENDING" || requestedByBranch,
+    homePublishStatus: status,
+    homePublishRequestedAt: status ? new Date() : null,
+    homePublishReviewedAt: reviewed ? new Date() : null,
+    homePublishReviewedBy: reviewed ? admin.id : null,
+    homePublishRejectReason:
+      status === "REJECTED" ? input.homePublishRejectReason ?? null : null,
+  }
+}
+
+function applyHomePublishUpdate(
+  data: Prisma.NewsArticleUncheckedUpdateInput,
+  existing: NewsArticle,
+  admin: AdminPrincipal,
+  input: {
+    showOnHomeRequested?: boolean
+    homePublishStatus?: HomePublishStatus | null
+    homePublishRejectReason?: string | null
+  }
+) {
+  if (!existing.branchId) {
+    data.showOnHomeRequested = false
+    data.homePublishStatus = null
+    data.homePublishRequestedAt = null
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
+    return
+  }
+
+  if (admin.role === "SUPER_ADMIN") {
+    if (input.homePublishStatus === undefined) {
+      if (input.showOnHomeRequested !== undefined) {
+        data.showOnHomeRequested = input.showOnHomeRequested
+      }
+      return
+    }
+    const status = input.homePublishStatus
+    data.showOnHomeRequested = status === "APPROVED" || status === "PENDING"
+    data.homePublishStatus = status
+    data.homePublishRequestedAt =
+      status === "PENDING" && !existing.homePublishRequestedAt
+        ? new Date()
+        : existing.homePublishRequestedAt
+    data.homePublishReviewedAt =
+      status === "APPROVED" || status === "REJECTED" ? new Date() : null
+    data.homePublishReviewedBy =
+      status === "APPROVED" || status === "REJECTED" ? admin.id : null
+    data.homePublishRejectReason =
+      status === "REJECTED" ? input.homePublishRejectReason ?? null : null
+    return
+  }
+
+  if (input.showOnHomeRequested !== undefined) {
+    data.showOnHomeRequested = input.showOnHomeRequested
+    data.homePublishStatus = input.showOnHomeRequested ? "PENDING" : null
+    data.homePublishRequestedAt = input.showOnHomeRequested ? new Date() : null
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
+    return
+  }
+
+  if (existing.homePublishStatus === "APPROVED") {
+    data.showOnHomeRequested = true
+    data.homePublishStatus = "PENDING"
+    data.homePublishRequestedAt = new Date()
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
   }
 }
 
@@ -170,6 +289,7 @@ export async function newsList(req: Request, res: Response) {
     limit,
     orderByCreatedAt,
     branchId: branchIdFilter,
+    includeApprovedBranches: branchIdFilter == null && limit != null,
   })
   const lang = parseApiLang(req)
   // Всегда публичная форма для ленты с `limit` (главная, polling): иначе у админа
@@ -230,7 +350,9 @@ export async function newsCreate(req: Request, res: Response) {
         status: newsFields.status ?? "DRAFT",
         sortOrder: newsFields.sortOrder ?? 0,
         branchId,
+        ...homePublishCreateData(admin, branchId, newsFields),
       },
+      include: { branch: true },
     })
     return res.status(201).json(serializeNewsArticleAdmin(item))
   } catch (e) {
@@ -316,11 +438,13 @@ export async function newsUpdate(req: Request, res: Response) {
       data.branchId = bid
     }
   }
+  applyHomePublishUpdate(data, existing, admin, parsed.data)
 
   try {
     const item = await prisma.newsArticle.update({
       where: { id },
       data,
+      include: { branch: true },
     })
     return res.json(serializeNewsArticleAdmin(item))
   } catch (e) {

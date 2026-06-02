@@ -6,7 +6,7 @@ import {
 import type { Request, Response } from "express"
 
 import { parseApiLang, pickApiLang, type ApiLang } from "../lib/api-lang.js"
-import { getOptionalAdmin, requireAdminJson } from "../lib/auth.js"
+import { getOptionalAdmin, requireAdminJson, type AdminPrincipal } from "../lib/auth.js"
 import { jsonError, jsonValidationError } from "../lib/http.js"
 import { assertBranchScopedResource } from "../lib/resource-access.js"
 import {
@@ -17,6 +17,10 @@ import { prisma } from "../prisma.js"
 import { eventCreateSchema, eventUpdateSchema } from "../validators/content.js"
 
 type ContentScope = "main" | "branches" | "all"
+type HomePublishStatus = "PENDING" | "APPROVED" | "REJECTED"
+type BranchRelation = {
+  branch?: { titleRu: string; titleKz: string | null } | null
+}
 function parseContentScope(req: Request): ContentScope {
   const raw = req.query.type
   const v = Array.isArray(raw) ? raw[0] : raw
@@ -24,11 +28,18 @@ function parseContentScope(req: Request): ContentScope {
   return "main"
 }
 
-function serializeEventAdmin(item: Event) {
-  return { ...item, startsAt: item.startsAt?.toISOString() ?? null }
+function serializeEventAdmin(item: Event & BranchRelation) {
+  return {
+    ...item,
+    startsAt: item.startsAt?.toISOString() ?? null,
+    branchTitleRu: item.branch?.titleRu ?? null,
+    branchTitleKz: item.branch?.titleKz ?? null,
+    homePublishRequestedAt: item.homePublishRequestedAt?.toISOString() ?? null,
+    homePublishReviewedAt: item.homePublishReviewedAt?.toISOString() ?? null,
+  }
 }
 
-function serializeEventPublic(item: Event, lang: ApiLang) {
+function serializeEventPublic(item: Event & BranchRelation, lang: ApiLang) {
   return {
     id: item.id,
     slug: item.slug,
@@ -48,6 +59,112 @@ function serializeEventPublic(item: Event, lang: ApiLang) {
     ctaHref: item.ctaHref,
     featuredOnHome: item.featuredOnHome,
     branchId: item.branchId,
+    branchTitle: item.branchId
+      ? pickApiLang(lang, item.branch?.titleRu ?? null, item.branch?.titleKz ?? null)
+      : null,
+  }
+}
+
+function homePublishCreateData(
+  admin: AdminPrincipal,
+  branchId: string | null,
+  input: {
+    showOnHomeRequested?: boolean
+    homePublishStatus?: HomePublishStatus | null
+    homePublishRejectReason?: string | null
+  }
+): Partial<Prisma.EventUncheckedCreateInput> {
+  if (!branchId) {
+    return {
+      showOnHomeRequested: false,
+      homePublishStatus: null,
+      homePublishRequestedAt: null,
+      homePublishReviewedAt: null,
+      homePublishReviewedBy: null,
+      homePublishRejectReason: null,
+    }
+  }
+
+  const requestedByBranch = admin.role === "ADMIN" && input.showOnHomeRequested === true
+  const status =
+    admin.role === "SUPER_ADMIN"
+      ? input.homePublishStatus ?? (input.showOnHomeRequested ? "PENDING" : null)
+      : requestedByBranch
+        ? "PENDING"
+        : null
+  const reviewed = status === "APPROVED" || status === "REJECTED"
+
+  return {
+    showOnHomeRequested: status === "APPROVED" || status === "PENDING" || requestedByBranch,
+    homePublishStatus: status,
+    homePublishRequestedAt: status ? new Date() : null,
+    homePublishReviewedAt: reviewed ? new Date() : null,
+    homePublishReviewedBy: reviewed ? admin.id : null,
+    homePublishRejectReason:
+      status === "REJECTED" ? input.homePublishRejectReason ?? null : null,
+  }
+}
+
+function applyHomePublishUpdate(
+  data: Prisma.EventUncheckedUpdateInput,
+  existing: Event,
+  admin: AdminPrincipal,
+  input: {
+    showOnHomeRequested?: boolean
+    homePublishStatus?: HomePublishStatus | null
+    homePublishRejectReason?: string | null
+  }
+) {
+  if (!existing.branchId) {
+    data.showOnHomeRequested = false
+    data.homePublishStatus = null
+    data.homePublishRequestedAt = null
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
+    return
+  }
+
+  if (admin.role === "SUPER_ADMIN") {
+    if (input.homePublishStatus === undefined) {
+      if (input.showOnHomeRequested !== undefined) {
+        data.showOnHomeRequested = input.showOnHomeRequested
+      }
+      return
+    }
+    const status = input.homePublishStatus
+    data.showOnHomeRequested = status === "APPROVED" || status === "PENDING"
+    data.homePublishStatus = status
+    data.homePublishRequestedAt =
+      status === "PENDING" && !existing.homePublishRequestedAt
+        ? new Date()
+        : existing.homePublishRequestedAt
+    data.homePublishReviewedAt =
+      status === "APPROVED" || status === "REJECTED" ? new Date() : null
+    data.homePublishReviewedBy =
+      status === "APPROVED" || status === "REJECTED" ? admin.id : null
+    data.homePublishRejectReason =
+      status === "REJECTED" ? input.homePublishRejectReason ?? null : null
+    return
+  }
+
+  if (input.showOnHomeRequested !== undefined) {
+    data.showOnHomeRequested = input.showOnHomeRequested
+    data.homePublishStatus = input.showOnHomeRequested ? "PENDING" : null
+    data.homePublishRequestedAt = input.showOnHomeRequested ? new Date() : null
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
+    return
+  }
+
+  if (existing.homePublishStatus === "APPROVED") {
+    data.showOnHomeRequested = true
+    data.homePublishStatus = "PENDING"
+    data.homePublishRequestedAt = new Date()
+    data.homePublishReviewedAt = null
+    data.homePublishReviewedBy = null
+    data.homePublishRejectReason = null
   }
 }
 
@@ -72,6 +189,7 @@ export async function eventsList(req: Request, res: Response) {
     const items = await listPublishedEventsPublic({
       limit,
       branchId: branchIdFilter,
+      includeApprovedBranches: branchIdFilter == null,
     })
     // Всегда публичная форма (`title`, `description`, …): иначе залогиненный админ
     // на главной получает сырой Prisma-объект (`titleRu`), а клиентский маппер ломается.
@@ -140,7 +258,14 @@ export async function eventsCreate(req: Request, res: Response) {
   if (!parsed.success) {
     return jsonValidationError(res, parsed.error)
   }
-  const { startsAt, branchId: bodyBranchId, ...rest } = parsed.data
+  const {
+    startsAt,
+    branchId: bodyBranchId,
+    showOnHomeRequested,
+    homePublishStatus,
+    homePublishRejectReason,
+    ...rest
+  } = parsed.data
   const slug = rest.slug.trim()
   if (!slug) {
     return jsonError(
@@ -196,7 +321,13 @@ export async function eventsCreate(req: Request, res: Response) {
         slug,
         startsAt: startsAtDate,
         branchId,
+        ...homePublishCreateData(admin, branchId, {
+          showOnHomeRequested,
+          homePublishStatus,
+          homePublishRejectReason,
+        }),
       },
+      include: { branch: true },
     })
     return res.status(201).json(serializeEventAdmin(item))
   } catch (e) {
@@ -276,7 +407,14 @@ export async function eventsPatch(req: Request, res: Response) {
   if (!parsed.success) {
     return jsonValidationError(res, parsed.error)
   }
-  const { startsAt, branchId: patchBranchId, ...rest } = parsed.data
+  const {
+    startsAt,
+    branchId: patchBranchId,
+    showOnHomeRequested,
+    homePublishStatus,
+    homePublishRejectReason,
+    ...rest
+  } = parsed.data
   const data: Prisma.EventUncheckedUpdateInput = {
     ...(rest as Prisma.EventUncheckedUpdateInput),
     ...(startsAt !== undefined
@@ -294,10 +432,16 @@ export async function eventsPatch(req: Request, res: Response) {
       data.branchId = patchBranchId
     }
   }
+  applyHomePublishUpdate(data, existing, admin, {
+    showOnHomeRequested,
+    homePublishStatus,
+    homePublishRejectReason,
+  })
   try {
     const item = await prisma.event.update({
       where: { id },
       data,
+      include: { branch: true },
     })
     return res.json(serializeEventAdmin(item))
   } catch {

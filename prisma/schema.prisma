@@ -28,6 +28,12 @@ enum Role {
   ADMIN
 }
 
+enum HomePublishStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 /// Филиал библиотечной сети; админы привязаны к филиалу (кроме SUPER_ADMIN).
 /// Публичные страницы: /branches и /branches/[id] (id — cuid из БД).
 model Branch {
@@ -186,10 +192,18 @@ model NewsArticle {
   curatorKz     String?
   status        PublishStatus  @default(DRAFT)
   sortOrder     Int            @default(0)
+  showOnHomeRequested Boolean  @default(false)
+  homePublishStatus HomePublishStatus?
+  homePublishRequestedAt DateTime?
+  homePublishReviewedAt DateTime?
+  homePublishReviewedBy String?
+  homePublishRejectReason String?
   branchId      String?
   branch        Branch?        @relation(fields: [branchId], references: [id])
   createdAt     DateTime       @default(now())
   updatedAt   DateTime         @updatedAt
+
+  @@index([homePublishStatus])
 }
 
 model Event {
@@ -216,10 +230,18 @@ model Event {
   featuredOnHome  Boolean       @default(false)
   status          PublishStatus @default(DRAFT)
   sortOrder       Int           @default(0)
+  showOnHomeRequested Boolean    @default(false)
+  homePublishStatus HomePublishStatus?
+  homePublishRequestedAt DateTime?
+  homePublishReviewedAt DateTime?
+  homePublishReviewedBy String?
+  homePublishRejectReason String?
   branchId        String?
   branch          Branch?       @relation(fields: [branchId], references: [id])
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+
+  @@index([homePublishStatus])
 }
 
 model DigitalLibraryItem {
