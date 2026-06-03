@@ -87,6 +87,17 @@ function fileKey(name: string): string {
 }
 
 async function main() {
+  const section = await prisma.staffSection.upsert({
+    where: { id: "staff-section-district-leaders" },
+    create: {
+      id: "staff-section-district-leaders",
+      titleRu: "Руководители районных библиотек",
+      titleKz: "Аудандық кітапханалар директорлары",
+      sortOrder: 0,
+    },
+    update: {},
+  })
+
   const imgDir = path.resolve(
     process.cwd(),
     "../frontend/web/public/structurpageimg"
@@ -210,6 +221,7 @@ async function main() {
     await prisma.staff.create({
       data: {
         slug,
+        sectionId: section.id,
         fullNameRu: p.fullNameRu,
         fullNameKz: p.fullNameRu,
         birthDate,

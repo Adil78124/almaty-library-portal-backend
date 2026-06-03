@@ -26,6 +26,7 @@ const optionalPhone = z
 
 export const staffCreateSchema = z.object({
   slug: z.string().min(3).max(200),
+  sectionId: optionalText,
   fullNameRu: z.string().min(3).max(200).transform(scrubName),
   fullNameKz: optionalText,
   birthDate: z
@@ -50,6 +51,7 @@ export const staffCreateSchema = z.object({
       return d
     }),
   phone: optionalPhone,
+  email: optionalText,
   positionRu: optionalText,
   positionKz: optionalText,
   branchRu: z.string().min(2).max(200).transform(scrubText),
@@ -61,6 +63,16 @@ export const staffCreateSchema = z.object({
 
 export const staffUpdateSchema = staffCreateSchema
   .omit({ slug: true })
+  .partial()
+  .refine((d) => Object.keys(d).length > 0, { message: "Укажите хотя бы одно поле" })
+
+export const staffSectionCreateSchema = z.object({
+  titleRu: z.string().min(2).max(200).transform(scrubText),
+  titleKz: optionalText,
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+})
+
+export const staffSectionUpdateSchema = staffSectionCreateSchema
   .partial()
   .refine((d) => Object.keys(d).length > 0, { message: "Укажите хотя бы одно поле" })
 
