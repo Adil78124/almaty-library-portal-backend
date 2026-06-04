@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "db:generate": "prisma generate",
+    "db:repair-staff-sections": "tsx scripts/repair-staff-sections.ts",
     "db:backfill-kz": "tsx scripts/backfill-kz-fields.ts",
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc",
