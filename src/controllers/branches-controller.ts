@@ -35,7 +35,12 @@ function parseBranchSocialLinksInput(
   if (!Array.isArray(parsed)) {
     throw new Error("INVALID_SOCIAL_JSON")
   }
-  const normalized: { label: string; url: string; icon?: string }[] = []
+  const normalized: {
+    label: string
+    labelKz?: string
+    url: string
+    icon?: string
+  }[] = []
   for (const item of parsed) {
     if (!item || typeof item !== "object") {
       throw new Error("INVALID_SOCIAL_JSON")
@@ -45,6 +50,10 @@ function parseBranchSocialLinksInput(
       throw new Error("INVALID_SOCIAL_JSON")
     }
     const label = o.label.trim()
+    const labelKz =
+      typeof o.labelKz === "string" && o.labelKz.trim()
+        ? o.labelKz.trim()
+        : undefined
     const url = o.url.trim()
     if (!label || !url) {
       continue
@@ -63,7 +72,13 @@ function parseBranchSocialLinksInput(
       const ic = normalizeSocialIconStored(o.icon)
       if (ic !== "link") iconOut = ic
     }
-    const row: { label: string; url: string; icon?: string } = { label, url }
+    const row: {
+      label: string
+      labelKz?: string
+      url: string
+      icon?: string
+    } = { label, url }
+    if (labelKz) row.labelKz = labelKz
     if (iconOut) row.icon = iconOut
     normalized.push(row)
   }
@@ -146,8 +161,11 @@ export async function branchesCreate(req: Request, res: Response) {
         published: d.published ?? true,
         isMainBranch: d.isMainBranch ?? false,
         subtitle: strOrNull(d.subtitle ?? undefined),
+        subtitleKz: strOrNull(d.subtitleKz ?? undefined),
         cityLabel: strOrNull(d.cityLabel ?? undefined),
+        cityLabelKz: strOrNull(d.cityLabelKz ?? undefined),
         address: strOrNull(d.address ?? undefined),
+        addressKz: strOrNull(d.addressKz ?? undefined),
         phone: strOrNull(d.phone ?? undefined),
         email: strOrNull(d.email ?? undefined),
         hours: strOrNull(d.hours ?? undefined),
@@ -183,8 +201,11 @@ export async function branchesUpdate(req: Request, res: Response) {
   if (d.published !== undefined) data.published = d.published
   if (d.isMainBranch !== undefined) data.isMainBranch = d.isMainBranch
   if (d.subtitle !== undefined) data.subtitle = strOrNull(d.subtitle)
+  if (d.subtitleKz !== undefined) data.subtitleKz = strOrNull(d.subtitleKz)
   if (d.cityLabel !== undefined) data.cityLabel = strOrNull(d.cityLabel)
+  if (d.cityLabelKz !== undefined) data.cityLabelKz = strOrNull(d.cityLabelKz)
   if (d.address !== undefined) data.address = strOrNull(d.address)
+  if (d.addressKz !== undefined) data.addressKz = strOrNull(d.addressKz)
   if (d.phone !== undefined) data.phone = strOrNull(d.phone)
   if (d.email !== undefined) data.email = strOrNull(d.email)
   if (d.hours !== undefined) data.hours = strOrNull(d.hours)
@@ -247,10 +268,13 @@ export async function branchesPatchContacts(req: Request, res: Response) {
   if (d.titleRu !== undefined) data.titleRu = d.titleRu
   if (d.titleKz !== undefined) data.titleKz = d.titleKz
   if (d.subtitle !== undefined) data.subtitle = strOrNull(d.subtitle)
+  if (d.subtitleKz !== undefined) data.subtitleKz = strOrNull(d.subtitleKz)
   if (d.cityLabel !== undefined) data.cityLabel = strOrNull(d.cityLabel)
+  if (d.cityLabelKz !== undefined) data.cityLabelKz = strOrNull(d.cityLabelKz)
   if (d.cardImageUrl !== undefined) data.cardImageUrl = strOrNull(d.cardImageUrl)
   if (d.heroImageUrl !== undefined) data.heroImageUrl = strOrNull(d.heroImageUrl)
   if (d.address !== undefined) data.address = strOrNull(d.address)
+  if (d.addressKz !== undefined) data.addressKz = strOrNull(d.addressKz)
   if (d.phone !== undefined) data.phone = strOrNull(d.phone)
   if (d.email !== undefined) data.email = strOrNull(d.email)
   if (d.hours !== undefined) data.hours = strOrNull(d.hours)
